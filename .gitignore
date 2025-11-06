@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+.venv311/
+venv/
+ENV/
+env/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs and checkpoints
+logdir/
+*.log
+MUJOCO_LOG.TXT
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Large data files (uncomment if needed)
+# *.h5
+# *.hdf5
+# *.pkl
+# *.pickle
+
+# Checkpoints (uncomment if you don't want to track checkpoints)
+# ckpt/
+# *.ckpt
+
+# Learning curves and plots (optional - you might want to track these)
+# *.png
+# *.jpg
+# *.pdf
+
