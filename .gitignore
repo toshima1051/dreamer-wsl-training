@@ -32,6 +32,9 @@ logdir/
 *.log
 MUJOCO_LOG.TXT
 
+# ただし、logs/sample/ ディレクトリ内のサンプルログは含める
+!logs/sample/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -55,4 +58,7 @@ Thumbs.db
 # *.png
 # *.jpg
 # *.pdf
+
+# ただし、logs/sample/ ディレクトリ内の動画は含める
+!logs/sample/videos/
 
