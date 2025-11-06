@@ -7,7 +7,9 @@
 4. [発生した問題と解決策](#発生した問題と解決策)
 5. [学習の実行と確認方法](#学習の実行と確認方法)
 6. [DreamerV3とDreamer4の比較](#dreamerv3とdreamer4の比較)
-7. [参考資料](#参考資料)
+7. [専門用語集](#専門用語集)
+8. [参考文献一覧](#参考文献一覧)
+9. [プロジェクトの構成](#プロジェクトの構成)
 
 ---
 
@@ -158,74 +160,44 @@ WSL側でDISPLAY設定:
 export DISPLAY=:0
 ```
 
-#### 2.2 GUI描画で学習実行
+#### 2.2 GUI描画で学習実行（最新版・推奨）
 `scripts/train_gui_memory_optimized.sh`:
+
+このスクリプトは、通常設定（フルサイズモデル）を使用しつつ、メモリ使用量を最適化した設定で学習を実行します。
+
+**主な特徴**:
+- **通常設定を使用**: debug設定ではなく、フルサイズのモデルを使用（`units: 1024`, `layers: 3`など）
+- **メモリ最適化**: バッチサイズ、環境数、リプレイバッファサイズを調整してメモリ使用量を削減
+- **チェックポイントからの再開**: 既存のログディレクトリを指定することで学習を再開可能
+- **ROCmエラー回避**: CUDAバックエンドを強制し、ROCmの誤検出を防止
+
+**使用方法**:
+
+新しい学習を開始:
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-LOGDIR_BASE="${1:-$HOME/logdir/dreamer}"
-TASK="${2:-dmc_cartpole_swingup}"
-
-TS="$(date +%Y%m%d-%H%M%S)"
-LOGDIR="${LOGDIR_BASE}/${TS}"
-
-# DISPLAY環境変数を設定
-if [ -z "${DISPLAY:-}" ]; then
-    export DISPLAY=:0
-fi
-
-source "/home/ruku/source/dreamer/.venv311/bin/activate"
-
-# ROCmを無効化してCUDAを強制
-export HIP_VISIBLE_DEVICES=""
-export JAX_PLATFORMS=cuda
-export JAX_PLATFORM_NAME=cuda
-export MUJOCO_GL=glfw  # GUI描画
-export ROCM_PATH=""
-export HSA_OVERRIDE_GFX_VERSION=""
-
-cd /home/ruku/source/dreamer/external/dreamerv3
-
-# Pythonスクリプト内で環境変数を設定（JAXインポート前に必須）
-python -c "
-import os
-import sys
-
-# 環境変数を設定
-os.environ['HIP_VISIBLE_DEVICES'] = ''
-os.environ['JAX_PLATFORMS'] = 'cuda'
-os.environ['JAX_PLATFORM_NAME'] = 'cuda'
-os.environ['MUJOCO_GL'] = 'glfw'
-os.environ['ROCM_PATH'] = ''
-os.environ['HSA_OVERRIDE_GFX_VERSION'] = ''
-
-# JAXをインポートして設定を確認
-import jax
-jax.config.update('jax_platforms', 'cuda')
-
-# dreamerv3をインポート
-from dreamerv3 import main as dv3_main
-
-sys.argv = [
-    'dreamerv3/main.py',
-    '--logdir', '${LOGDIR}',
-    '--configs', 'debug',
-    '--jax.platform', 'gpu',
-    '--task', '${TASK}',
-    '--batch_size', '4',
-    '--run.envs', '1',
-    '--run.train_ratio', '8',
-    '--replay.size', '5000',
-]
-dv3_main.main()
-"
+export DISPLAY=:0
+bash /home/ruku/source/dreamer/scripts/train_gui_memory_optimized.sh
 ```
+
+既存のログから再開:
+```bash
+bash /home/ruku/source/dreamer/scripts/train_gui_memory_optimized.sh \
+  "$HOME/logdir/dreamer" \
+  "dmc_cartpole_swingup" \
+  "$HOME/logdir/dreamer/20251107-003058"
+```
+
+**現在の設定**（メモリ最適化済み）:
+- `batch_size`: 8（デフォルト16から削減）
+- `batch_length`: 32（デフォルト64から削減）
+- `run.envs`: 4（デフォルト16から削減）
+- `run.train_ratio`: 32（デフォルト維持）
+- `replay.size`: 200000（デフォルト5,000,000から削減）
 
 **重要なポイント**:
 - 環境変数をPythonスクリプト内で設定（JAXインポート前）
 - `jax.config.update('jax_platforms', 'cuda')`で明示的にCUDAを指定
-- メモリ節約のためバッチサイズと環境数を削減
+- メモリ不足が発生した場合は、さらに`batch_size`や`run.envs`を削減
 
 ### 3. 可視化ツール
 
@@ -286,12 +258,20 @@ Killed (プロセスが強制終了)
 
 **原因**:
 - GUI描画（glfw）がメモリを多く消費
-- バッチサイズや環境数が大きすぎる
+- 通常設定（フルサイズモデル）を使用している場合、メモリ使用量が大きい
+- バッチサイズ、環境数、リプレイバッファサイズが大きすぎる
 
 **解決策**:
-- バッチサイズを8→4に削減
-- 環境数を4→1に削減
-- リプレイバッファサイズを削減
+1. **バッチサイズを削減**: 12 → 8 → 6（必要に応じて）
+2. **環境数を削減**: 8 → 4 → 2（必要に応じて）
+3. **リプレイバッファサイズを削減**: 500000 → 200000 → 100000（必要に応じて）
+4. **batch_lengthを削減**: 48 → 32 → 16（必要に応じて）
+5. **debug設定に戻す**: メモリが非常に限られている場合（モデルサイズが小さくなる）
+
+**メモリ使用量の目安**:
+- 通常設定（フルサイズ）: 約2-4GB（GPUメモリ）
+- debug設定: 約500MB-1GB（GPUメモリ）
+- GUI描画（glfw）: 追加で約500MB-1GB（システムメモリ）
 
 ### 問題3: 動画が真っ白
 
@@ -356,12 +336,37 @@ tail -f $HOME/logdir/dreamer/<timestamp>/metrics.jsonl
 
 ### 3. CartPole Swingupタスクの目標
 
+**タスクの説明**:
 - **Swingup**: ポールを下向きから上向きに振り上げる
 - **Balance**: 上向きの状態を維持する（倒さない）
 
 **スコアの意味**:
 - スコアが高い = ポールを上向きにして長時間バランスを保てている
 - スコア100 = エピソードの最大長（約1000ステップ）まで上向きを維持できている
+- 学習が進むと、スコアが15 → 100 → 200以上と向上していく
+
+**学習の進捗確認**:
+- `episode/score`: エピソードスコア（高いほど良い）
+- `train/loss/image`: 画像再構成損失（低いほど良い、通常10以下）
+- `train/loss/policy`: 方策損失（低いほど良い、通常0.1以下）
+- `replay/replay_ratio`: リプレイバッファの使用率（30以上が理想的）
+
+### 4. チェックポイントからの学習再開
+
+学習を中断した場合や、設定を変更して再開したい場合、チェックポイントから学習を再開できます。
+
+**再開方法**:
+```bash
+bash /home/ruku/source/dreamer/scripts/train_gui_memory_optimized.sh \
+  "$HOME/logdir/dreamer" \
+  "dmc_cartpole_swingup" \
+  "$HOME/logdir/dreamer/YYYYMMDD-HHMMSS"
+```
+
+**注意事項**:
+- チェックポイントは`<logdir>/ckpt/`ディレクトリに保存されます
+- 設定を変更した場合（`batch_size`、`run.envs`など）、チェックポイントと互換性がない可能性があります
+- その場合は、新しいログディレクトリで学習を開始するか、設定を元の値に戻してください
 
 ---
 
@@ -719,6 +724,92 @@ Dreamer4は、DreamerV3の優れた特徴（固定ハイパーパラメータ、
 
 ---
 
+## 専門用語集
+
+### 強化学習関連
+
+- **エピソード（Episode）**: エージェントが環境と相互作用する一連のステップ。通常、終了条件（タスク完了、失敗など）に達するまで続く
+  - **参考文献**: [Sutton & Barto (2018) Reinforcement Learning: An Introduction](http://incompleteideas.net/book/the-book-2nd.html) Chapter 3
+
+- **リプレイバッファ（Replay Buffer）**: 過去の経験（観測、行動、報酬）を保存するメモリ。学習時にランダムにサンプリングして使用する
+  - **サイズ**: 大きいほど多様な経験を保持できるが、メモリ使用量が増える
+  - **参考文献**: [Mnih et al. (2015) Human-level control through deep reinforcement learning](https://www.nature.com/articles/nature14236)
+
+- **バッチサイズ（Batch Size）**: 一度に処理するサンプル数。大きいほど学習が安定するが、メモリ使用量が増える
+  - **参考文献**: [Goodfellow et al. (2016) Deep Learning](https://www.deeplearningbook.org/) Chapter 8
+
+- **バッチ長（Batch Length）**: 時系列データの長さ。長いほど長期的な依存関係を学習できるが、メモリ使用量が増える
+  - **参考文献**: [DreamerV3論文](https://arxiv.org/pdf/2301.04104) Section 3
+
+### DreamerV3関連
+
+- **RSSM（Recurrent State Space Model）**: 再帰的な状態空間モデル。決定論的状態と確率的状態の組み合わせで環境のダイナミクスをモデル化
+  - **決定論的状態（Deterministic State）**: 過去の情報を集約した状態
+  - **確率的状態（Stochastic State）**: 不確実性を表現する状態
+  - **参考文献**: 
+    - [DreamerV3論文](https://arxiv.org/pdf/2301.04104) Section 3.1
+    - [Hafner et al. (2019) Learning Latent Dynamics for Planning from Pixels](https://arxiv.org/abs/1811.04551)
+
+- **カテゴリカル表現（Categorical Representations）**: 離散的な潜在変数を使用した表現。連続値ではなく、離散的なカテゴリで状態を表現
+  - **利点**: シンボリックな表現を学習でき、解釈しやすい
+  - **参考文献**: 
+    - [DreamerV3論文](https://arxiv.org/pdf/2301.04104) Section 3.2
+    - [Van den Oord et al. (2017) Neural Discrete Representation Learning](https://arxiv.org/abs/1711.00937)
+
+- **想像ロールアウト（Imagination Rollout）**: 世界モデル内で将来の状態を予測し、その予測された軌道で方策を学習する手法
+  - **利点**: 実際の環境との相互作用なしで学習できるため、データ効率が高い
+  - **参考文献**: 
+    - [DreamerV3論文](https://arxiv.org/pdf/2301.04104) Section 2.3
+    - [Hafner et al. (2020) Dream to Control: Learning Behaviors by Latent Imagination](https://arxiv.org/abs/1912.01603)
+
+- **Actor-Critic**: 方策（Actor）と価値関数（Critic）を同時に学習する強化学習アルゴリズム
+  - **Actor**: 行動を選択する方策
+  - **Critic**: 状態や行動の価値を評価する関数
+  - **参考文献**: 
+    - [Sutton & Barto (2018)](http://incompleteideas.net/book/the-book-2nd.html) Chapter 13
+    - [DreamerV3論文](https://arxiv.org/pdf/2301.04104) Section 2.3
+
+- **変分目的関数（Variational Objective）**: 変分推論に基づく目的関数。潜在変数の分布を学習するために使用
+  - **参考文献**: 
+    - [Kingma & Welling (2014) Auto-Encoding Variational Bayes](https://arxiv.org/abs/1312.6114)
+    - [DreamerV3論文](https://arxiv.org/pdf/2301.04104) Section 3
+
+### Dreamer4関連
+
+- **Transformer**: 注意機構（Attention Mechanism）を使用したニューラルネットワークアーキテクチャ。長期的な依存関係を捉える能力が高い
+  - **参考文献**: 
+    - [Vaswani et al. (2017) Attention Is All You Need](https://arxiv.org/abs/1706.03762)
+    - [Dreamer4論文](https://arxiv.org/abs/2509.24527) Section 3
+
+- **Shortcut Forcing Objective**: 中間表現を直接学習することで推論パスを短縮し、リアルタイム推論を可能にする目的関数
+  - **参考文献**: [Dreamer4論文](https://arxiv.org/abs/2509.24527) Abstract
+
+- **オフライン学習（Offline Learning）**: 環境との相互作用なしで、事前に収集されたデータから学習する手法
+  - **利点**: 安全で効率的な学習が可能。実世界の応用（ロボティクスなど）に適している
+  - **参考文献**: 
+    - [Levine et al. (2020) Offline Reinforcement Learning: Tutorial, Review, and Perspectives](https://arxiv.org/abs/2005.01643)
+    - [Dreamer4論文](https://arxiv.org/abs/2509.24527) Abstract
+
+### 技術用語
+
+- **JAX**: Googleが開発した機械学習フレームワーク。NumPyライクなAPIを持ち、自動微分とGPU/TPU対応が特徴
+  - **参考文献**: [JAX公式ドキュメント](https://jax.readthedocs.io/)
+
+- **CUDA**: NVIDIAが開発したGPU向けの並列計算プラットフォーム
+  - **参考文献**: [CUDA公式ドキュメント](https://docs.nvidia.com/cuda/)
+
+- **ROCm**: AMDが開発したGPU向けの並列計算プラットフォーム。CUDAの代替
+  - **問題**: JAXがROCmを誤検出することがあるため、CUDAを強制する必要がある
+  - **参考文献**: [ROCm公式ドキュメント](https://rocm.docs.amd.com/)
+
+- **X11転送**: LinuxのX Window Systemをリモートで使用する技術。WSLからWindows側のXサーバーにGUIを表示できる
+  - **参考文献**: [X11公式ドキュメント](https://www.x.org/)
+
+- **MuJoCo**: 物理シミュレーションエンジン。ロボティクスや強化学習の研究で広く使用される
+  - **参考文献**: [MuJoCo公式ドキュメント](https://mujoco.readthedocs.io/)
+
+---
+
 ## 参考文献一覧
 
 ### DreamerV3の参考文献
@@ -799,15 +890,61 @@ Dreamer4は、DreamerV3の優れた特徴（固定ハイパーパラメータ、
 2. **GPU実行**: ROCmバックエンドの誤検出を回避し、CUDAで正常動作
 3. **GUI描画**: X11転送を設定し、動画を正しく表示
 4. **可視化**: Scopeビューアとメトリクス可視化ツールで学習を監視
+5. **メモリ最適化**: 通常設定（フルサイズモデル）を使用しつつ、メモリ使用量を最適化
+6. **チェックポイント機能**: 学習を中断・再開できる機能を実装
+7. **GitHub公開**: プロジェクトをGitHubで公開し、サンプルログと動画を含める
 
-今後の改善点:
+### 学習結果の例
+
+実際の学習では、以下のような進捗が確認できました：
+- **初期**: `episode/score: 15.03`（ランダム行動に近い）
+- **学習中**: `episode/score: 106.39 → 109.55 → 214.22`（徐々に向上）
+- **損失**: `train/loss/image: 223.57 → 3.87`（画像再構成が改善）
+- **リプレイバッファ**: `replay/replay_ratio: 27.16 → 32.7`（十分な経験を収集）
+
+### 今後の改善点
+
 - **Dreamer4への移行**: Dreamer4が公開されたら、オフライン学習やより複雑なタスクへの対応を検討
 - より複雑なタスク（Minecraft、Atari等）での学習
 - ハイパーパラメータの最適化
 - オフライン学習の実装（Dreamer4の手法を参考）
+- より大きなモデルサイズでの実験（メモリに余裕がある場合）
 
 ---
 
-**最終更新**: 2025年11月6日
+**最終更新**: 2025年11月7日
 **プロジェクトディレクトリ**: `/home/ruku/source/dreamer`
+**GitHubリポジトリ**: https://github.com/toshima1051/dreamer-wsl-training
+
+## プロジェクトの構成
+
+### ディレクトリ構造
+```
+dreamer/
+├── scripts/                    # 学習・可視化スクリプト
+│   ├── train_gui_memory_optimized.sh  # GUI描画でメモリ最適化された学習（推奨）
+│   ├── train_with_gui.sh      # GUI描画での学習（基本版）
+│   ├── train_memory_efficient.sh  # オフスクリーン描画での学習
+│   ├── plot_metrics.py         # メトリクスの可視化
+│   └── render_episodes.py     # エピソードのレンダリング
+├── logs/sample/               # サンプルログと動画
+│   ├── metrics.jsonl          # 学習メトリクス
+│   ├── scores.jsonl           # エピソードスコア
+│   ├── config.yaml            # 学習設定
+│   └── videos/                # エピソード動画
+├── external/dreamerv3/        # DreamerV3リポジトリ（サブモジュール）
+├── COMPLETE_GUIDE.md          # この完全ガイド
+├── SETUP_DREAMERV3_WSL.md     # WSL環境でのセットアップ手順
+├── X11_SETUP.md               # X11転送の設定方法
+└── README.md                  # プロジェクト概要
+```
+
+### サンプルログと動画
+
+プロジェクトには、実際の学習結果のサンプルが含まれています：
+- `logs/sample/metrics.jsonl`: 学習メトリクスの時系列データ
+- `logs/sample/scores.jsonl`: エピソードスコアと長さ
+- `logs/sample/videos/epstats-policy_image/`: エピソードごとのポリシー画像動画
+
+これらのサンプルは、学習の進捗を理解するのに役立ちます。
 
